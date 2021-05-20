@@ -36,7 +36,7 @@ if __name__ == "__main__":
         print("Number of arguments not valid!")
         sys.exit(1)
 
-    with open('./config.json') as config:
+    with open(os.path.join(os.path.dirname(__file__),"./config.json")) as config:
         parameters = json.load(config)["configuration"][0]
 
     INPUT_PATH = str(sys.argv[1])
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     
     sc = SparkContext("yarn", "Kmeans")
     sc.setLogLevel("ERROR")
-    sc.addPyFile("./point.py") ## It's necessary, otherwise the spark framework doesn't see point.py
+    sc.addPyFile(os.path.join(os.path.dirname(__file__),"./point.py")) ## It's necessary, otherwise the spark framework doesn't see point.py
 
     print("\n***START****\n")
 
