@@ -1,6 +1,6 @@
 # k-means: Map-Reduce with spark
 
-This repository is based on [seraogianluca/k-means-mapreduce](https://github.com/seraogianluca/k-means-mapreduce) and rewritten to work with stand-alone Spark (without Hadoop). The original Readme, describing and showing the k-means algorithm was moved to [doc/README.md](https://github.com/hu-macsy/k-means-mapreduce/blob/master/doc/README.md).
+This repository is based on [seraogianluca/k-means-mapreduce](https://github.com/seraogianluca/k-means-mapreduce) and rewritten to work with stand-alone Spark (without Hadoop) and slurm. The original Readme, describing and showing the k-means algorithm was moved to [doc/README.md](https://github.com/hu-macsy/k-means-mapreduce/blob/master/doc/README.md).
 
 ## Running spark on a local system (single process)
 
