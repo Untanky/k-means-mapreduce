@@ -57,3 +57,5 @@ k-means/.project
 k-means/.settings/*
 k-means-spark/__pycache__/*
 k-means-spark/output/*
+output/*
+slurm-*

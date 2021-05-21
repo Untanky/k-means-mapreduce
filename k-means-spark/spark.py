@@ -2,6 +2,7 @@ import sys
 import os
 import json
 from pyspark import SparkContext
+from pyspark.sql import SparkSession
 from point import Point
 import time
 
@@ -42,7 +43,9 @@ if __name__ == "__main__":
     INPUT_PATH = str(sys.argv[1])
     OUTPUT_PATH = str(sys.argv[2])
     
-    sc = SparkContext("yarn", "Kmeans")
+    spark = SparkSession.builder.appName("PySparkkmeans").getOrCreate()
+    sc = spark.sparkContext
+    #sc = SparkContext("yarn", "Kmeans")
     sc.setLogLevel("ERROR")
     sc.addPyFile(os.path.join(os.path.dirname(__file__),"./point.py")) ## It's necessary, otherwise the spark framework doesn't see point.py
 
