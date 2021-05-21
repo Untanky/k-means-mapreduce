@@ -43,7 +43,9 @@ JOBID      PARTITION     NAME     USER      ST       TIME       NODES NODELIST(R
 
 ### Basic: Changing configuration of slurm-script for your task
 
-In the default state `k-means-slurm-spark.sh` configures all spark related variables and launches `k-means-spark/spark.py` on a medium sized dataset (`datasets/10k/dataset_3_13.txt`). Based on how you decide to solve the task, changes may be necessary (both for script and dataset). Be sure not to modify the environment variables in the script, this may break the functionality. Take a look at how `spark.py` implements and creates a SparkSession. Be sure to match this kind of initialisation if you want to run the script with slurm. Background: PySpark supports several initialisation mechanisms. The current implementation of `spark.py` uses a local `SparkSession`, relying on spark-submit + slurm to handle ressources. Other Session types (like `yarn`, `hadoop`) need hadoop as back-end infrastructure. This is not available on the HU department of Computer Science infrastructure.
+In the default state `k-means-slurm-spark.sh` configures all spark related variables and launches `k-means-spark/spark.py` on a medium sized dataset (`datasets/10k/dataset_3_13.txt`). Based on how you decide to solve the task, changes may be necessary (both for script and dataset). Be sure not to modify the environment variables in the script, this may break the functionality. 
+
+Also take a look at how `spark.py` implements and creates a SparkSession. Be sure to match this kind of initialisation if you want to run a different script with slurm. Background: PySpark supports several initialisation mechanisms. The current implementation of `spark.py` uses a local `SparkSession`, relying on spark-submit + slurm to handle ressources. Other Session types (like `yarn`, `hadoop`) need hadoop as back-end infrastructure. This is not available on the HU department of Computer Science infrastructure.
 
 ### Advanced: Optimization of ressource allocation
 
