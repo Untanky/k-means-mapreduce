@@ -5,6 +5,7 @@ This repository is based on [seraogianluca/k-means-mapreduce](https://github.com
 ## Running spark on a local system (single process)
 
 
+
 ## Running spark with slurm (multi process)
 
 Besides the possibilty to setup a personal Spark cluster (could also be Hadoop), Spark supports being initialised via slurm (scheduling system). This repo provides a complete and portable script, ready-to-use with the slurm infrastructure at the HU department of Computer Science. For more background information on how slurm works, there is german [doc site](https://www.informatik.hu-berlin.de/de/org/rechnerbetriebsgruppe/dienste/hpc/slurm) available.
@@ -40,9 +41,15 @@ JOBID      PARTITION     NAME     USER      ST       TIME       NODES NODELIST(R
 67108957   defq          spark-te brandtfa  R        16:24      4     kudamm,lankwitz,marzahn,mitte
 ```
 
-### Changing configuration of slurm-script
+### Basic: Changing configuration of slurm-script for your task
 
-In the default state `k-means-slurm-spark.sh` configures all spark related variables and launches a specific file (`k-means-spark/spark.py`) on a medium sized dataset (`datasets/10k/dataset_3_13.txt`). Based on how you decide to solve the task, changes may be necessary. Be sure not to modify the environment variables in the script, this may break the functionality. You can modify the ressource usage (line 5-9, line 51).
+In the default state `k-means-slurm-spark.sh` configures all spark related variables and launches `k-means-spark/spark.py` on a medium sized dataset (`datasets/10k/dataset_3_13.txt`). Based on how you decide to solve the task, changes may be necessary (both for script and dataset). Be sure not to modify the environment variables in the script, this may break the functionality. Take a look at how `spark.py` implements and creates a SparkSession. Be sure to match this kind of initialisation if you want to run the script with slurm. Background: PySpark supports several initialisation mechanisms. The current implementation of `spark.py` uses a local `SparkSession`, relying on spark-submit + slurm to handle ressources. Other Session types (like `yarn`, `hadoop`) need hadoop as back-end infrastructure. This is not available on the HU department of Computer Science infrastructure.
+
+### Advanced: Optimization of ressource allocation
+
+This is kind of optional for the task. You can leave all related variables as they are. However, if you think this can improve running time - you can modify the ressource usage (line 5-9 + line 51).
+
+Number of CPU-cores/nodes:
 
 ```
 (line 5-9)
@@ -56,11 +63,22 @@ In the default state `k-means-slurm-spark.sh` configures all spark related varia
 
 ```
 (line 51)
-spark-submit --total-executor-cores 16 --executor-memory 1G ${REPO_PATH}/k-means-spark/spark.py file://${REPO_PATH}/datasets/10k/dataset_3_13.txt ${REPO_PATH}/output/output_${SLURM_JOB_ID}.out
+spark-submit --total-executor-cores 16 --executor-memory 2G ${REPO_PATH}/k-means-spark/spark.py file://${REPO_PATH}/datasets/10k/dataset_3_13.txt ${REPO_PATH}/output/output_${SLURM_JOB_ID}.out
 ```
 
-This sets the ressource allocation for slurm. Four worker nodes are allocated, where on each node two worker processes are spawned. Each of these processes may use up to two cores. In total 16 cores are available for computation. The amount of workers is set in line 51 by parameter `--total-executor-cores`. Note, that this number should match the number of `#nodes * #ntask-per-node * #cpus-per-task`. The script also works if `--total-executor-cores` is set to a different parameter, but this leads to lower performance and over/underprovisioning. Feel free to change ressource allocations, but be aware that communcation penalty increases for higher number of Spark workers.
+Line 5-9 set the ressource allocation for slurm. Four worker nodes are allocated, where on each node two worker processes are spawned. Each of these processes may use up to two cores. In total 16 CPU-cores are available for computation. The amount of Spark workers is set in line 51 by parameter `--total-executor-cores`. Note, that this number should match the number of `#nodes * #ntask-per-node * #cpus-per-task`. The script also works if `--total-executor-cores` is set to a different number, but in general this leads to lower performance and over/underprovisioning. Feel free to change ressource allocations, but be aware that communcation penalty increases for higher number of Spark workers.
 
-### Changing initialisation of spark
+Amount of memory:
 
-PySpark supports several initialisation mechanism. The current implementation of `k-means-spark/spark.py` uses a local `SparkSession`, relying on spark-submit + slurm to handle ressources. Other Session types (like `yarn`, `hadoop`) need hadoop as back-end infrastructure. This is not available on the HU department of Computer Science infrastructure.
+```
+(line 10-11)
+# Set memory allocation per cpu
+#SBATCH --mem-per-cpu 1G
+```
+
+```
+(line 51)
+spark-submit --total-executor-cores 16 --executor-memory 2G ${REPO_PATH}/k-means-spark/spark.py file://${REPO_PATH}/datasets/10k/dataset_3_13.txt ${REPO_PATH}/output/output_${SLURM_JOB_ID}.out
+```
+
+Line 11 again set the amount of memory, which slurm allocates per CPU-core. Since per default `--cpus-per-task` is set to two, each worker task can use up to `2G` of memory. This amount is set again in line 51 by parameter `--executor-memory`. Again, this value can be adjusted accordingly. However be sure to match `#cpus-per-task * #mem-per-cpu = #executor-memory`, otherwise the job may fail or waste ressources. 

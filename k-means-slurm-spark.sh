@@ -7,6 +7,8 @@
 #SBATCH --ntasks-per-node=2
 # Number of CPU-cores per task
 #SBATCH --cpus-per-task=2
+# Set memory allocation per cpu
+#SBATCH --mem-per-cpu 1G
 # Disable Hyperthreads
 #SBATCH --ntasks-per-core=1
 # Set output folder
@@ -48,4 +50,4 @@ echo ""
 echo " About to run the spark job"
 echo ""
 
-spark-submit --total-executor-cores 16 --executor-memory 1G ${REPO_PATH}/k-means-spark/spark.py file://${REPO_PATH}/datasets/10k/dataset_3_13.txt ${REPO_PATH}/output/output_${SLURM_JOB_ID}.out
+spark-submit --total-executor-cores 16 --executor-memory 2G ${REPO_PATH}/k-means-spark/spark.py file://${REPO_PATH}/datasets/10k/dataset_3_13.txt ${REPO_PATH}/output/output_${SLURM_JOB_ID}.out
