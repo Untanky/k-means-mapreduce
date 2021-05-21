@@ -4,7 +4,22 @@ This repository is based on [seraogianluca/k-means-mapreduce](https://github.com
 
 ## Running spark on a local system (single process)
 
+1. Download the latest [spark-standalone archive](https://www.apache.org/dyn/closer.lua/spark/spark-3.1.1/spark-3.1.1-bin-hadoop3.2.tgz) and extract the contents. Either add the `bin`-folder from the archive to your path or call `spark-submit` with the complete path.
 
+2. Clone repo and cd into repo:
+
+```
+git clone https://github.com/hu-macsy/k-means-mapreduce/
+cd k-means-mapreduce
+```
+
+3. Execute `spark-submit`:
+
+```
+spark-submit --total-executor-cores 2 --executor-memory 2G ./k-means-spark/spark.py ./datasets/10k/dataset_3_13.txt ./output/test.out
+```
+
+While the explicit setup is done in `spark.py`, `spark-submit` handles the creation of the necessary computation environment. It launches `k-means-spark/spark.py` on a medium sized dataset (`datasets/10k/dataset_3_13.txt`). Based on how you decide to solve the task, changes may be necessary (both for script and dataset). You can see the log of the computation directly on stdout, while the output is written to `output`-folder.
 
 ## Running spark with slurm (multi process)
 
@@ -41,6 +56,8 @@ JOBID      PARTITION     NAME     USER      ST       TIME       NODES NODELIST(R
 67108957   defq          spark-te brandtfa  R        16:24      4     kudamm,lankwitz,marzahn,mitte
 ```
 
+Both log and output from the job is written to `output`-folder. The file-names (both log and output) contain the job-id, visible after job-submission and via `squeue`.
+
 ### Basic: Changing configuration of slurm-script for your task
 
 In the default state `k-means-slurm-spark.sh` configures all spark related variables and launches `k-means-spark/spark.py` on a medium sized dataset (`datasets/10k/dataset_3_13.txt`). Based on how you decide to solve the task, changes may be necessary (both for script and dataset). Be sure not to modify the environment variables in the script, this may break the functionality. 
@@ -49,7 +66,7 @@ Also take a look at how `spark.py` implements and creates a SparkSession. Be sur
 
 ### Advanced: Optimization of ressource allocation
 
-This is kind of optional for the task. You can leave all related variables as they are. However, if you think this can improve running time - you can modify the ressource usage (line 5-9 + line 51).
+This is optional for the task. You can leave all related variables as they are. However, if you think this can improve running time - you can modify the ressource usage (line 5-9 + line 51).
 
 Number of CPU-cores/nodes:
 
