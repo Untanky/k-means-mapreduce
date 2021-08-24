@@ -7,12 +7,21 @@ from point import Point
 import time
 
 def init_centroids(dataset, k):
+    """
+    Randomly select `k` points from the loaded `dataset` as initial centroits
+    Benchmarked with time
+    """
     start_time = time.time()
     initial_centroids = dataset.takeSample(False, k)
     print("init centroid execution:", len(initial_centroids), "in", (time.time() - start_time), "s")
     return initial_centroids
 
 def assign_centroids(p):
+    """
+    Returns the nearest centroid of p, as well as p itself
+
+    The centroids are taken from the centroids_broadcast
+    """
     min_dist = float("inf")
     centroids = centroids_broadcast.value
     nearest_centroid = 0
@@ -24,6 +33,9 @@ def assign_centroids(p):
     return (nearest_centroid, p)
 
 def stopping_criterion(new_centroids, threshold):
+    """
+    When centroids haven't changed more than `threshold` in distance, the centroids have been found
+    """
     old_centroids = centroids_broadcast.value
     for i in range(len(old_centroids)):
         check = old_centroids[i].distance(new_centroids[i], distance_broadcast.value) <= threshold
