@@ -1,7 +1,7 @@
 import sys
 import os
 import json
-from numpy import add
+from numpy import ceil, floor
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
 from point import Point
@@ -53,20 +53,43 @@ def join_centroids(p):
         list.append((p, centroid))
     return list
 
-def group_distances(distance_rdd, f):
+def group_distances_by(distance_rdd, f):
     get_distance = lambda x: [value[1] for value in list(x)]
     sum_distance = lambda x: sum(x)
     distance_by_points_rdd = distance_rdd.groupBy(f).mapValues(get_distance)
     total_distance_by_points_rdd = distance_by_points_rdd.mapValues(sum_distance)
     return (distance_by_points_rdd, total_distance_by_points_rdd)
 
-def get_distances(distance_rdd):
-    (distance_by_points_rdd, total_distance_by_points_rdd) = group_distances(distance_rdd, lambda x: x[0][0])
-    (distance_by_centroids_rdd, total_distance_by_centroids_rdd) = group_distances(distance_rdd, lambda x: x[0][1])
+def group_distances(distance_rdd):
+    (distance_by_points_rdd, total_distance_by_points_rdd) = group_distances_by(distance_rdd, lambda x: x[0][0])
+    (distance_by_centroids_rdd, total_distance_by_centroids_rdd) = group_distances_by(distance_rdd, lambda x: x[0][1])
     return (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd)
 
 def divide_distance(wtf):
-    return (wtf[1][0][0], 1-wtf[1][0][1]/wtf[1][1])
+    point_centroid_pair = wtf[1][0][0]
+    point_centroid_distance = wtf[1][0][1]
+    total_centroid_distance = wtf[1][1]
+    relative_distance = point_centroid_distance/total_centroid_distance
+    return (point_centroid_pair, (1 - relative_distance) / (parameters["k"] - 1))
+
+def get_assignment(point_centroids_pair_rdd):
+    calculate_pair_distance = lambda a: (a, a[0].distance(a[1], distance_broadcast.value))
+    distance_rdd = point_centroids_pair_rdd.map(calculate_pair_distance)
+    total_distance_by_points_rdd = group_distances(distance_rdd)[2]
+
+    normalized_distances = distance_rdd.map(lambda x: (x[0][0], x)).join(total_distance_by_points_rdd).map(divide_distance)
+    return normalized_distances
+    
+def reassign(assignment):
+    lower_bound = lower_bound_broadcast.value
+    upper_bound = upper_bound_broadcast.value
+
+    (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd) = group_distances(assignment_rdd)
+    lower_centroid_rdd = total_distance_by_centroids_rdd.filter(lambda x: x[1] < lower_bound)
+    upper_centroid_rdd = total_distance_by_centroids_rdd.filter(lambda x: x[1] > upper_bound)
+
+
+    return False, assignment_rdd
 
 if __name__ == "__main__":
     start_time = time.time()
@@ -89,18 +112,25 @@ if __name__ == "__main__":
     print("\n***START****\n")
 
     points = sc.textFile(INPUT_PATH).map(Point).cache()
+    
+    large_k = points.count() / parameters["k"]
+    lower_bound = floor(large_k) * (1 - parameters["margin"])
+    upper_bound = ceil(large_k) * (1 + parameters["margin"])
+    print("Lower Bound: ", lower_bound, "\nUpper Bound:", upper_bound, "\n")
+
     initial_centroids = init_centroids(points, k=parameters["k"])
+    
     distance_broadcast = sc.broadcast(parameters["distance"])
     centroids_broadcast = sc.broadcast(initial_centroids)
+    lower_bound_broadcast = sc.broadcast(lower_bound)
+    upper_bound_broadcast = sc.broadcast(upper_bound)
 
-    joined_point_centroids_rdd = points.map(join_centroids).flatMap(lambda x: x)
+    point_centroids_pair_rdd = points.map(join_centroids).flatMap(lambda x: x)
 
-    distance_rdd = joined_point_centroids_rdd.map(lambda a: (a, a[0].distance(a[1], distance_broadcast.value)))
-    (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd) = get_distances(distance_rdd)
-
-    foo = distance_rdd.map(lambda x: (x[0][1], x)).join(total_distance_by_centroids_rdd).map(divide_distance)
-    (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd) = get_distances(foo)
-    # print(total_distance_by_points_rdd.collect())
+    assignment_rdd = get_assignment(point_centroids_pair_rdd)
+    stop = True
+    while(stop):
+        stop, assignment_rdd = reassign(assignment_rdd)
 
     execution_time = time.time() - start_time
     print("\nexecution time:", execution_time, "s")
