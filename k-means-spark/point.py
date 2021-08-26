@@ -34,6 +34,12 @@ class Point:
             result += " "
         return result.strip()
 
+    def __hash__(self):
+        return hash(str(self.components))
+
+    def __eq__(self, other):
+        return hash(self) == hash(other)
+
     def __repr__(self):
         # Spark uses this method when save on text file
         result = ""

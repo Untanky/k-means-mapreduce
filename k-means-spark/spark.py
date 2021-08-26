@@ -1,9 +1,11 @@
 import sys
 import os
 import json
+from numpy import add
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
 from point import Point
+from operator import add
 import time
 
 def init_centroids(dataset, k):
@@ -43,6 +45,29 @@ def stopping_criterion(new_centroids, threshold):
             return False
     return True
 
+def join_centroids(p):
+    centroids = centroids_broadcast.value
+    list = []
+    for i in range(len(centroids)):
+        centroid = centroids[i]
+        list.append((p, centroid))
+    return list
+
+def group_distances(distance_rdd, f):
+    get_distance = lambda x: [value[1] for value in list(x)]
+    sum_distance = lambda x: sum(x)
+    distance_by_points_rdd = distance_rdd.groupBy(f).mapValues(get_distance)
+    total_distance_by_points_rdd = distance_by_points_rdd.mapValues(sum_distance)
+    return (distance_by_points_rdd, total_distance_by_points_rdd)
+
+def get_distances(distance_rdd):
+    (distance_by_points_rdd, total_distance_by_points_rdd) = group_distances(distance_rdd, lambda x: x[0][0])
+    (distance_by_centroids_rdd, total_distance_by_centroids_rdd) = group_distances(distance_rdd, lambda x: x[0][1])
+    return (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd)
+
+def divide_distance(wtf):
+    return (wtf[1][0][0], 1-wtf[1][0][1]/wtf[1][1])
+
 if __name__ == "__main__":
     start_time = time.time()
     if len(sys.argv) != 3:
@@ -68,27 +93,16 @@ if __name__ == "__main__":
     distance_broadcast = sc.broadcast(parameters["distance"])
     centroids_broadcast = sc.broadcast(initial_centroids)
 
-    stop, n = False, 0
-    while True:
-        print("--Iteration n. {itr:d}".format(itr=n+1), end="\r", flush=True)
-        cluster_assignment_rdd = points.map(assign_centroids)
-        sum_rdd = cluster_assignment_rdd.reduceByKey(lambda x, y: x.sum(y))
-        centroids_rdd = sum_rdd.mapValues(lambda x: x.get_average_point()).sortByKey(ascending=True)
+    joined_point_centroids_rdd = points.map(join_centroids).flatMap(lambda x: x)
 
-        new_centroids = [item[1] for item in centroids_rdd.collect()]
-        stop = stopping_criterion(new_centroids,parameters["threshold"])
+    distance_rdd = joined_point_centroids_rdd.map(lambda a: (a, a[0].distance(a[1], distance_broadcast.value)))
+    (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd) = get_distances(distance_rdd)
 
-        n += 1
-        if(stop == False and n < parameters["maxiteration"]):
-            centroids_broadcast = sc.broadcast(new_centroids)
-        else:
-            break
-
-    with open(OUTPUT_PATH, "w") as f:
-        for centroid in new_centroids:
-            f.write(str(centroid) + "\n")
+    foo = distance_rdd.map(lambda x: (x[0][1], x)).join(total_distance_by_centroids_rdd).map(divide_distance)
+    (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd) = get_distances(foo)
+    # print(total_distance_by_points_rdd.collect())
 
     execution_time = time.time() - start_time
     print("\nexecution time:", execution_time, "s")
-    print("average time per iteration:", execution_time/n, "s")
-    print("n_iter:", n)
+    # print("average time per iteration:", execution_time/n, "s")
+    # print("n_iter:", n)
