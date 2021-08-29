@@ -5,6 +5,8 @@ from numpy import ceil, floor
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
 from point import Point
+from pair import Pair
+from pair_group import PairGroup
 from operator import add
 import time
 
@@ -53,41 +55,36 @@ def join_centroids(p):
         list.append((p, centroid))
     return list
 
-def group_distances_by(distance_rdd, f):
-    get_distance = lambda x: [value[1] for value in list(x)]
-    sum_distance = lambda x: sum(x)
-    distance_by_points_rdd = distance_rdd.groupBy(f).mapValues(get_distance)
-    total_distance_by_points_rdd = distance_by_points_rdd.mapValues(sum_distance)
-    return (distance_by_points_rdd, total_distance_by_points_rdd)
-
-def group_distances(distance_rdd):
-    (distance_by_points_rdd, total_distance_by_points_rdd) = group_distances_by(distance_rdd, lambda x: x[0][0])
-    (distance_by_centroids_rdd, total_distance_by_centroids_rdd) = group_distances_by(distance_rdd, lambda x: x[0][1])
-    return (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd)
+def group_distances(pairs_rdd):
+    to_pair_group = lambda x: PairGroup(x[0], list(x[1]))
+    distance_by_points_rdd = pairs_rdd.groupBy(lambda x: x.point).map(to_pair_group)
+    distance_by_centroids_rdd = pairs_rdd.groupBy(lambda x: x.centroid).map(to_pair_group)
+    return (distance_by_points_rdd, distance_by_centroids_rdd)
 
 def divide_distance(wtf):
-    point_centroid_pair = wtf[1][0][0]
-    point_centroid_distance = wtf[1][0][1]
-    total_centroid_distance = wtf[1][1]
-    relative_distance = point_centroid_distance/total_centroid_distance
-    return (point_centroid_pair, (1 - relative_distance) / (parameters["k"] - 1))
+    total_distance = wtf[1][1]
+    pair = wtf[1][0]
+    return pair.normalize_distance(total_distance, parameters["k"])
 
-def get_assignment(point_centroids_pair_rdd):
-    calculate_pair_distance = lambda a: (a, a[0].distance(a[1], distance_broadcast.value))
-    distance_rdd = point_centroids_pair_rdd.map(calculate_pair_distance)
-    total_distance_by_points_rdd = group_distances(distance_rdd)[2]
+def get_assignment(pairs_rdd):
+    grouped_distances = group_distances(pairs_rdd)
+    distance_by_points_rdd = grouped_distances[0]
+    total_distance_by_points_rdd = distance_by_points_rdd.map(lambda group: (group.focus, group.sum()))
 
-    normalized_distances = distance_rdd.map(lambda x: (x[0][0], x)).join(total_distance_by_points_rdd).map(divide_distance)
+    # TODO: find better way to do this  
+    normalized_distances = pairs_rdd.map(lambda x: (x.point, x)).join(total_distance_by_points_rdd).map(divide_distance)
     return normalized_distances
     
-def reassign(assignment):
+def reassign(assignment_rdd):
     lower_bound = lower_bound_broadcast.value
     upper_bound = upper_bound_broadcast.value
 
-    (distance_by_points_rdd, distance_by_centroids_rdd, total_distance_by_points_rdd, total_distance_by_centroids_rdd) = group_distances(assignment_rdd)
+    (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
+    total_distance_by_centroids_rdd = distance_by_centroids_rdd.map(lambda group: (group.focus, group.sum()))
     lower_centroid_rdd = total_distance_by_centroids_rdd.filter(lambda x: x[1] < lower_bound)
     upper_centroid_rdd = total_distance_by_centroids_rdd.filter(lambda x: x[1] > upper_bound)
-
+    foo = lower_centroid_rdd.union(upper_centroid_rdd)
+    print(foo.collect(), lower_bound, upper_bound)
 
     return False, assignment_rdd
 
@@ -108,6 +105,8 @@ if __name__ == "__main__":
     #sc = SparkContext("yarn", "Kmeans")
     sc.setLogLevel("ERROR")
     sc.addPyFile(os.path.join(os.path.dirname(__file__),"./point.py")) ## It's necessary, otherwise the spark framework doesn't see point.py
+    sc.addPyFile(os.path.join(os.path.dirname(__file__),"./pair.py")) ## It's necessary, otherwise the spark framework doesn't see pair.py
+    sc.addPyFile(os.path.join(os.path.dirname(__file__),"./pair_group.py")) ## It's necessary, otherwise the spark framework doesn't see pair_group.py
 
     print("\n***START****\n")
 
@@ -125,9 +124,9 @@ if __name__ == "__main__":
     lower_bound_broadcast = sc.broadcast(lower_bound)
     upper_bound_broadcast = sc.broadcast(upper_bound)
 
-    point_centroids_pair_rdd = points.map(join_centroids).flatMap(lambda x: x)
+    pairs_rdd = points.map(join_centroids).flatMap(lambda x: [Pair(pair[0], pair[1], distance_broadcast.value) for pair in x])
 
-    assignment_rdd = get_assignment(point_centroids_pair_rdd)
+    assignment_rdd = get_assignment(pairs_rdd)
     stop = True
     while(stop):
         stop, assignment_rdd = reassign(assignment_rdd)
