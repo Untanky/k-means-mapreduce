@@ -26,6 +26,10 @@ class Point:
     def get_average_point(self):
         self.components = np.around(np.divide(self.components, self.number_of_points), 5)
         return self
+
+    def set_components(self, components):
+        self.components = components
+        return self
     
     def __str__(self):
         result = ""

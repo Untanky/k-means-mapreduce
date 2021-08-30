@@ -3,7 +3,7 @@
     [{
       "distance": 2,
       "k": 7,
-      "threshold": 0.0001,
+      "threshold": 2,
       "maxiteration": 50,
       "margin": 0.01
     }]

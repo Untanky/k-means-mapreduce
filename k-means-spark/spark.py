@@ -1,7 +1,7 @@
 import sys
 import os
 import json
-from numpy import ceil, floor
+from numpy import ceil, floor, dot
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
 from point import Point
@@ -20,32 +20,9 @@ def init_centroids(dataset, k):
     print("init centroid execution:", len(initial_centroids), "in", (time.time() - start_time), "s")
     return initial_centroids
 
-def assign_centroids(p):
-    """
-    Returns the nearest centroid of p, as well as p itself
-
-    The centroids are taken from the centroids_broadcast
-    """
-    min_dist = float("inf")
-    centroids = centroids_broadcast.value
-    nearest_centroid = 0
-    for i in range(len(centroids)):
-        distance = p.distance(centroids[i], distance_broadcast.value)
-        if(distance < min_dist):
-            min_dist = distance
-            nearest_centroid = i
-    return (nearest_centroid, p)
-
-def stopping_criterion(new_centroids, threshold):
-    """
-    When centroids haven't changed more than `threshold` in distance, the centroids have been found
-    """
-    old_centroids = centroids_broadcast.value
-    for i in range(len(old_centroids)):
-        check = old_centroids[i].distance(new_centroids[i], distance_broadcast.value) <= threshold
-        if check == False:
-            return False
-    return True
+def objective_function(assignment_rdd, new_centroids_rdd):
+    foo = assignment_rdd.map(lambda pair: (pair.centroid, pair)).join(new_centroids_rdd).values().map(lambda x: x[0].distance * (dot(x[1], x[1]) - 2 * dot(x[0].point.components, x[1])))
+    return foo.sum()
 
 def join_centroids(p):
     centroids = centroids_broadcast.value
@@ -80,13 +57,17 @@ def reassign(assignment_rdd):
     upper_bound = upper_bound_broadcast.value
 
     (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
-    total_distance_by_centroids_rdd = distance_by_centroids_rdd.map(lambda group: (group.focus, group.sum()))
-    lower_centroid_rdd = total_distance_by_centroids_rdd.filter(lambda x: x[1] < lower_bound)
-    upper_centroid_rdd = total_distance_by_centroids_rdd.filter(lambda x: x[1] > upper_bound)
-    foo = lower_centroid_rdd.union(upper_centroid_rdd)
-    print(foo.collect(), lower_bound, upper_bound)
+    while distance_by_centroids_rdd.map(lambda group: group.sum()).filter(lambda dist: dist <= lower_bound or dist >= upper_bound).count() > 0:
+        assignment_rdd = distance_by_centroids_rdd.map(lambda group: group.rebalance(lower_bound, upper_bound)).flatMap(lambda group: group.pairs)
+        assignment_rdd = assignment_rdd.map(lambda group: group.execute_actions())
+        (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
 
-    return False, assignment_rdd
+    return assignment_rdd
+
+def recalculate_centroids(assignment_rdd):
+    (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
+    centeroids = distance_by_centroids_rdd.map(lambda group: (group.focus, group.center()))
+    return centeroids
 
 if __name__ == "__main__":
     start_time = time.time()
@@ -124,14 +105,28 @@ if __name__ == "__main__":
     lower_bound_broadcast = sc.broadcast(lower_bound)
     upper_bound_broadcast = sc.broadcast(upper_bound)
 
-    pairs_rdd = points.map(join_centroids).flatMap(lambda x: [Pair(pair[0], pair[1], distance_broadcast.value) for pair in x])
+    stop, objective, n = False, float("inf"), 0
+    while True:
+        print("--Iteration n. {itr:d}".format(itr=n+1), end="\r", flush=True)
+        pairs_rdd = points.map(join_centroids).flatMap(lambda x: [Pair(pair[0], pair[1], distance_broadcast.value) for pair in x])
 
-    assignment_rdd = get_assignment(pairs_rdd)
-    stop = True
-    while(stop):
-        stop, assignment_rdd = reassign(assignment_rdd)
+        assignment_rdd = get_assignment(pairs_rdd)
+        assignment_rdd = reassign(assignment_rdd)
+        new_centroids_rdd = recalculate_centroids(assignment_rdd)
+        new_objective = objective_function(assignment_rdd, new_centroids_rdd)
+        print(objective, new_objective)
+        if objective <= new_objective and objective - new_objective <= parameters["threshold"]:
+            break
+        n += 1
+        objective = new_objective
+        centroids_broadcast = sc.broadcast(new_centroids_rdd.map(lambda x: x[0].set_components(x[1])).collect())
+
+
+    with open(OUTPUT_PATH, "w") as f:
+        for centroid in centroids_broadcast.value:
+            f.write(str(centroid) + "\n")
 
     execution_time = time.time() - start_time
     print("\nexecution time:", execution_time, "s")
-    # print("average time per iteration:", execution_time/n, "s")
-    # print("n_iter:", n)
+    print("average time per iteration:", execution_time/n, "s")
+    print("n_iter:", n)
