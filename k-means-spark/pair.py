@@ -4,12 +4,20 @@ class Pair:
     self.centroid = centroid
     self.distance = point.distance(centroid, h)
     self.actions = []
+    self.balanced = False
 
-  def normalize_distance(self, total_centroid_distance, k):
-    relative_distance = self.distance / total_centroid_distance
-    # normalized_distance = (1 - relative_distance) / (k - 1)
+  def set_relative_distance(self, max_distance):
+    relative_distance = self.distance / max_distance
     self.distance = relative_distance
     return self
+
+  def set_normalize_distance(self, total_centroid_distance):
+    normalized_distance = (1 - self.distance) / total_centroid_distance
+    self.distance = normalized_distance
+    return self
+
+  def set_balanced(self, balanced = True):
+    self.balanced = balanced
 
   def append_action(self, action):
     self.actions.append(action)

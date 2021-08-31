@@ -22,6 +22,13 @@ class PairGroup:
       sum += pair.distance
     return sum
 
+  def max(self):
+    max = float("-inf")
+    for pair in self.pairs:
+      if pair.distance > max:
+        max = pair.distance
+    return max
+
   def center(self):
     center = 0
     for pair in self.pairs:
@@ -34,10 +41,10 @@ class PairGroup:
     baz = 1000/7
 
     if total <= lower:
-      (inc, dec) = foo(min((lower - total) / (baz * 5), 0.01))
+      (inc, dec) = foo(min((lower - total) / (baz * 5), 0.1))
       action = inc
     elif total >= upper:
-      (inc, dec) = foo(min((total - upper) / (baz * 5), 0.01))
+      (inc, dec) = foo(min((total - upper) / (baz * 5), 0.1))
       action = dec
     else:
       return self

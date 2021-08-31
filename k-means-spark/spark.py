@@ -20,16 +20,13 @@ def init_centroids(dataset, k):
     print("init centroid execution:", len(initial_centroids), "in", (time.time() - start_time), "s")
     return initial_centroids
 
-def objective_function(assignment_rdd, new_centroids_rdd):
-    foo = assignment_rdd.map(lambda pair: (pair.centroid, pair)).join(new_centroids_rdd).values().map(lambda x: x[0].distance * (dot(x[1], x[1]) - 2 * dot(x[0].point.components, x[1])))
-    return foo.sum()
-
 def join_centroids(p):
+    distance = distance_broadcast.value
     centroids = centroids_broadcast.value
     list = []
     for i in range(len(centroids)):
         centroid = centroids[i]
-        list.append((p, centroid))
+        list.append(Pair(p, centroid, distance))
     return list
 
 def group_distances(pairs_rdd):
@@ -38,24 +35,34 @@ def group_distances(pairs_rdd):
     distance_by_centroids_rdd = pairs_rdd.groupBy(lambda x: x.centroid).map(to_pair_group)
     return (distance_by_points_rdd, distance_by_centroids_rdd)
 
-def divide_distance(wtf):
-    total_distance = wtf[1][1]
+def relative_distance(wtf):
+    max_distance = wtf[1][1]
     pair = wtf[1][0]
-    return pair.normalize_distance(total_distance, parameters["k"])
+    return pair.set_relative_distance(max_distance)
+
+def normalized_distance(wtf):
+    max_distance = wtf[1][1]
+    pair = wtf[1][0]
+    return pair.set_relative_distance(max_distance)
 
 def get_assignment(pairs_rdd):
     grouped_distances = group_distances(pairs_rdd)
     distance_by_points_rdd = grouped_distances[0]
-    total_distance_by_points_rdd = distance_by_points_rdd.map(lambda group: (group.focus, group.sum()))
-
+    max_distance_by_points_rdd = distance_by_points_rdd.map(lambda group: (group.focus, group.max()))
     # TODO: find better way to do this  
-    normalized_distances = pairs_rdd.map(lambda x: (x.point, x)).join(total_distance_by_points_rdd).map(divide_distance)
-    return normalized_distances
+    relative_distances_rdd = pairs_rdd.map(lambda x: (x.point, x)).join(max_distance_by_points_rdd).map(relative_distance)
+    
+    grouped_distances = group_distances(relative_distances_rdd)
+    distance_by_points_rdd = grouped_distances[0]
+    total_distance_by_points_rdd = distance_by_points_rdd.map(lambda group: (group.focus, group.sum()))
+    # TODO: find better way to do this  
+    normalized_distances_rdd = relative_distances_rdd.map(lambda x: (x.point, x)).join(total_distance_by_points_rdd).map(normalized_distance)
+    return normalized_distances_rdd
     
 def reassign(assignment_rdd):
     lower_bound = lower_bound_broadcast.value
     upper_bound = upper_bound_broadcast.value
-
+    
     (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
     while distance_by_centroids_rdd.map(lambda group: group.sum()).filter(lambda dist: dist <= lower_bound or dist >= upper_bound).count() > 0:
         assignment_rdd = distance_by_centroids_rdd.map(lambda group: group.rebalance(lower_bound, upper_bound)).flatMap(lambda group: group.pairs)
@@ -68,6 +75,10 @@ def recalculate_centroids(assignment_rdd):
     (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
     centeroids = distance_by_centroids_rdd.map(lambda group: (group.focus, group.center()))
     return centeroids
+
+def objective_function(assignment_rdd, new_centroids_rdd):
+    foo = assignment_rdd.map(lambda pair: (pair.centroid, pair)).join(new_centroids_rdd).values().map(lambda x: x[0].distance * (dot(x[1], x[1]) - 2 * dot(x[0].point.components, x[1])))
+    return foo.sum()
 
 if __name__ == "__main__":
     start_time = time.time()
@@ -108,7 +119,7 @@ if __name__ == "__main__":
     stop, objective, n = False, float("inf"), 0
     while True:
         print("--Iteration n. {itr:d}".format(itr=n+1), end="\r", flush=True)
-        pairs_rdd = points.map(join_centroids).flatMap(lambda x: [Pair(pair[0], pair[1], distance_broadcast.value) for pair in x])
+        pairs_rdd = points.map(join_centroids).flatMap(lambda pairs: [pair for pair in pairs])
 
         assignment_rdd = get_assignment(pairs_rdd)
         assignment_rdd = reassign(assignment_rdd)
