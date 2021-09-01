@@ -2,7 +2,7 @@
     "configuration":
     [{
       "distance": 2,
-      "k": 7,
+      "k": 13,
       "threshold": 0.0001,
       "maxiteration": 50
     }]

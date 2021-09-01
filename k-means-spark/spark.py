@@ -22,17 +22,19 @@ def setup_graph(points, k, distance):
 def get_matching(graph):
     distance = lambda edge: edge[1]
     matching = []
-    graph = graph.sortBy(distance)
-    while True:
-        matching_edge = graph.first()
-        matching.append(matching_edge)
-        point = matching_edge[0][0]
-        slot = matching_edge[0][1]
-
-        not_slot_or_point = lambda edge: not(edge[0][0] == point or edge[0][1] == slot)
-        graph = graph.filter(not_slot_or_point).cache()
-        if (graph.count() == 0):
-            break
+    points = {}
+    slots = {}
+    graph = graph.sortBy(distance).keys().collect()
+    
+    for edge in graph:
+        point = edge[0]
+        slot = edge[1]
+        if not(str(hash(point)) in points or str(hash(slot)) in slots):
+            matching.append(edge)
+            points[str(hash(point))] = 1
+            slots[str(hash(slot))] = 1
+    
+    print(len(matching))
     return matching
 
 def assign_centroids(p):
@@ -86,7 +88,7 @@ if __name__ == "__main__":
         graph = setup_graph(points, parameters["k"], parameters["distance"])
         matching = get_matching(graph)
 
-        cluster_assignment_rdd = sc.parallelize(matching).map(lambda x: (x[0][1] % parameters["k"], x[0][0]))
+        cluster_assignment_rdd = sc.parallelize(matching).map(lambda x: (x[1] % parameters["k"], x[0]))
         sum_rdd = cluster_assignment_rdd.reduceByKey(lambda x, y: x.sum(y))
         centroids_rdd = sum_rdd.mapValues(lambda x: x.get_average_point()).sortByKey()
 
