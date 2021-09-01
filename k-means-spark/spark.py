@@ -23,14 +23,16 @@ def get_matching(graph):
     distance = lambda edge: edge[1]
     matching = []
     graph = graph.sortBy(distance)
-    while graph.count() > 0:
+    while True:
         matching_edge = graph.first()
+        matching.append(matching_edge)
         point = matching_edge[0][0]
         slot = matching_edge[0][1]
 
         not_slot_or_point = lambda edge: not(edge[0][0] == point or edge[0][1] == slot)
-        graph = sc.parallelize(graph.filter(not_slot_or_point).collect())
-        matching.append(matching_edge)
+        graph = graph.filter(not_slot_or_point).cache()
+        if (graph.count() == 0):
+            break
     return matching
 
 def assign_centroids(p):
