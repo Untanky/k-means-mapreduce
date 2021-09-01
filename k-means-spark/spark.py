@@ -12,6 +12,27 @@ def init_centroids(dataset, k):
     print("init centroid execution:", len(initial_centroids), "in", (time.time() - start_time), "s")
     return initial_centroids
 
+def setup_graph(points, k, distance):
+    centroids = centroids_broadcast.value
+    slots = sc.parallelize(range(0, points.count()))
+    centroid_by_slot = slots.map(lambda slot_id: (slot_id, centroids[slot_id % k]))
+    graph = points.cartesian(centroid_by_slot).map(lambda x: ((x[0], x[1][0]), x[0].distance(x[1][1], distance)))
+    return graph
+
+def get_matching(graph):
+    distance = lambda edge: edge[1]
+    matching = []
+    graph = graph.sortBy(distance)
+    while graph.count() > 0:
+        matching_edge = graph.first()
+        point = matching_edge[0][0]
+        slot = matching_edge[0][1]
+
+        not_slot_or_point = lambda edge: not(edge[0][0] == point or edge[0][1] == slot)
+        graph = sc.parallelize(graph.filter(not_slot_or_point).collect())
+        matching.append(matching_edge)
+    return matching
+
 def assign_centroids(p):
     min_dist = float("inf")
     centroids = centroids_broadcast.value
@@ -59,11 +80,15 @@ if __name__ == "__main__":
     stop, n = False, 0
     while True:
         print("--Iteration n. {itr:d}".format(itr=n+1), end="\r", flush=True)
-        cluster_assignment_rdd = points.map(assign_centroids)
-        sum_rdd = cluster_assignment_rdd.reduceByKey(lambda x, y: x.sum(y))
-        centroids_rdd = sum_rdd.mapValues(lambda x: x.get_average_point()).sortByKey(ascending=True)
 
-        new_centroids = [item[1] for item in centroids_rdd.collect()]
+        graph = setup_graph(points, parameters["k"], parameters["distance"])
+        matching = get_matching(graph)
+
+        cluster_assignment_rdd = sc.parallelize(matching).map(lambda x: (x[0][1] % parameters["k"], x[0][0]))
+        sum_rdd = cluster_assignment_rdd.reduceByKey(lambda x, y: x.sum(y))
+        centroids_rdd = sum_rdd.mapValues(lambda x: x.get_average_point()).sortByKey()
+
+        new_centroids = centroids_rdd.values().collect()
         stop = stopping_criterion(new_centroids,parameters["threshold"])
 
         n += 1
