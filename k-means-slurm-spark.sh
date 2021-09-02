@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=spark-test
+#SBATCH --job-name=spark-lukas
 # Number of Nodes
 #SBATCH --nodes=4
 # Number of processes per Node

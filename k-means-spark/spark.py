@@ -1,84 +1,60 @@
 import sys
 import os
 import json
-from numpy import ceil, floor, dot
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
 from point import Point
-from pair import Pair
-from pair_group import PairGroup
-from operator import add
 import time
 
 def init_centroids(dataset, k):
-    """
-    Randomly select `k` points from the loaded `dataset` as initial centroits
-    Benchmarked with time
-    """
     start_time = time.time()
     initial_centroids = dataset.takeSample(False, k)
     print("init centroid execution:", len(initial_centroids), "in", (time.time() - start_time), "s")
     return initial_centroids
 
-def join_centroids(p):
-    distance = distance_broadcast.value
+def setup_graph(points, k, distance):
     centroids = centroids_broadcast.value
-    list = []
+    slots = sc.parallelize(range(0, points.count()))
+    centroid_by_slot = slots.map(lambda slot_id: (slot_id, centroids[slot_id % k]))
+    graph = points.cartesian(centroid_by_slot).map(lambda x: ((x[0], x[1][0]), x[0].distance(x[1][1], distance)))
+    return graph
+
+def get_matching(graph):
+    distance = lambda edge: edge[1]
+    matching = []
+    points = {}
+    slots = {}
+    graph = graph.sortBy(distance).keys().collect()
+    
+    for edge in graph:
+        point = edge[0]
+        slot = edge[1]
+        if not(str(hash(point)) in points or str(hash(slot)) in slots):
+            matching.append(edge)
+            points[str(hash(point))] = 1
+            slots[str(hash(slot))] = 1
+    
+    print(len(matching))
+    return matching
+
+def assign_centroids(p):
+    min_dist = float("inf")
+    centroids = centroids_broadcast.value
+    nearest_centroid = 0
     for i in range(len(centroids)):
-        centroid = centroids[i]
-        list.append(Pair(p, centroid, distance))
-    return list
+        distance = p.distance(centroids[i], distance_broadcast.value)
+        if(distance < min_dist):
+            min_dist = distance
+            nearest_centroid = i
+    return (nearest_centroid, p)
 
-def group_distances(pairs_rdd):
-    to_pair_group = lambda x: PairGroup(x[0], list(x[1]))
-    distance_by_points_rdd = pairs_rdd.groupBy(lambda x: x.point).map(to_pair_group)
-    distance_by_centroids_rdd = pairs_rdd.groupBy(lambda x: x.centroid).map(to_pair_group)
-    return (distance_by_points_rdd, distance_by_centroids_rdd)
-
-def relative_distance(wtf):
-    max_distance = wtf[1][1]
-    pair = wtf[1][0]
-    return pair.set_relative_distance(max_distance)
-
-def normalized_distance(wtf):
-    max_distance = wtf[1][1]
-    pair = wtf[1][0]
-    return pair.set_relative_distance(max_distance)
-
-def get_assignment(pairs_rdd):
-    grouped_distances = group_distances(pairs_rdd)
-    distance_by_points_rdd = grouped_distances[0]
-    max_distance_by_points_rdd = distance_by_points_rdd.map(lambda group: (group.focus, group.max()))
-    # TODO: find better way to do this  
-    relative_distances_rdd = pairs_rdd.map(lambda x: (x.point, x)).join(max_distance_by_points_rdd).map(relative_distance)
-    
-    grouped_distances = group_distances(relative_distances_rdd)
-    distance_by_points_rdd = grouped_distances[0]
-    total_distance_by_points_rdd = distance_by_points_rdd.map(lambda group: (group.focus, group.sum()))
-    # TODO: find better way to do this  
-    normalized_distances_rdd = relative_distances_rdd.map(lambda x: (x.point, x)).join(total_distance_by_points_rdd).map(normalized_distance)
-    return normalized_distances_rdd
-    
-def reassign(assignment_rdd):
-    lower_bound = lower_bound_broadcast.value
-    upper_bound = upper_bound_broadcast.value
-    
-    (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
-    while distance_by_centroids_rdd.map(lambda group: group.sum()).filter(lambda dist: dist <= lower_bound or dist >= upper_bound).count() > 0:
-        assignment_rdd = distance_by_centroids_rdd.map(lambda group: group.rebalance(lower_bound, upper_bound)).flatMap(lambda group: group.pairs)
-        assignment_rdd = assignment_rdd.map(lambda group: group.execute_actions())
-        (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
-
-    return assignment_rdd
-
-def recalculate_centroids(assignment_rdd):
-    (distance_by_points_rdd, distance_by_centroids_rdd) = group_distances(assignment_rdd)
-    centeroids = distance_by_centroids_rdd.map(lambda group: (group.focus, group.center()))
-    return centeroids
-
-def objective_function(assignment_rdd, new_centroids_rdd):
-    foo = assignment_rdd.map(lambda pair: (pair.centroid, pair)).join(new_centroids_rdd).values().map(lambda x: x[0].distance * (dot(x[1], x[1]) - 2 * dot(x[0].point.components, x[1])))
-    return foo.sum()
+def stopping_criterion(new_centroids, threshold):
+    old_centroids = centroids_broadcast.value
+    for i in range(len(old_centroids)):
+        check = old_centroids[i].distance(new_centroids[i], distance_broadcast.value) <= threshold
+        if check == False:
+            return False
+    return True
 
 if __name__ == "__main__":
     start_time = time.time()
@@ -97,45 +73,40 @@ if __name__ == "__main__":
     #sc = SparkContext("yarn", "Kmeans")
     sc.setLogLevel("ERROR")
     sc.addPyFile(os.path.join(os.path.dirname(__file__),"./point.py")) ## It's necessary, otherwise the spark framework doesn't see point.py
-    sc.addPyFile(os.path.join(os.path.dirname(__file__),"./pair.py")) ## It's necessary, otherwise the spark framework doesn't see pair.py
-    sc.addPyFile(os.path.join(os.path.dirname(__file__),"./pair_group.py")) ## It's necessary, otherwise the spark framework doesn't see pair_group.py
 
     print("\n***START****\n")
 
     points = sc.textFile(INPUT_PATH).map(Point).cache()
-    
-    large_k = points.count() / parameters["k"]
-    lower_bound = floor(large_k) * (1 - parameters["margin"])
-    upper_bound = ceil(large_k) * (1 + parameters["margin"])
-    print("Lower Bound: ", lower_bound, "\nUpper Bound:", upper_bound, "\n")
-
     initial_centroids = init_centroids(points, k=parameters["k"])
-    
     distance_broadcast = sc.broadcast(parameters["distance"])
     centroids_broadcast = sc.broadcast(initial_centroids)
-    lower_bound_broadcast = sc.broadcast(lower_bound)
-    upper_bound_broadcast = sc.broadcast(upper_bound)
 
-    stop, objective, n = False, float("inf"), 0
+    stop, n = False, 0
     while True:
         print("--Iteration n. {itr:d}".format(itr=n+1), end="\r", flush=True)
-        pairs_rdd = points.map(join_centroids).flatMap(lambda pairs: [pair for pair in pairs])
 
-        assignment_rdd = get_assignment(pairs_rdd)
-        assignment_rdd = reassign(assignment_rdd)
-        new_centroids_rdd = recalculate_centroids(assignment_rdd)
-        new_objective = objective_function(assignment_rdd, new_centroids_rdd)
-        print(objective, new_objective)
-        if objective <= new_objective and objective - new_objective <= parameters["threshold"]:
-            break
+        graph = setup_graph(points, parameters["k"], parameters["distance"])
+        matching = get_matching(graph)
+
+        cluster_assignment_rdd = sc.parallelize(matching).map(lambda x: (x[1] % parameters["k"], x[0]))
+        sum_rdd = cluster_assignment_rdd.reduceByKey(lambda x, y: x.sum(y))
+        centroids_rdd = sum_rdd.mapValues(lambda x: x.get_average_point()).sortByKey()
+
+        new_centroids = centroids_rdd.values().collect()
+        stop = stopping_criterion(new_centroids,parameters["threshold"])
+
         n += 1
-        objective = new_objective
-        centroids_broadcast = sc.broadcast(new_centroids_rdd.map(lambda x: x[0].set_components(x[1])).collect())
-
+        if(stop == False and n < parameters["maxiteration"]):
+            centroids_broadcast = sc.broadcast(new_centroids)
+        else:
+            break
 
     with open(OUTPUT_PATH, "w") as f:
-        for centroid in centroids_broadcast.value:
-            f.write(str(centroid) + "\n")
+        f.write("x,y,z,assignment,type")
+        for assignment in cluster_assignment_rdd.collect():
+            f.write(str(assignment[1]) + str(assignment[0]) + ",point\n")
+        for centroid in enumerate(new_centroids):
+            f.write(str(centroid[1]) + str(centroid[0]) + ",centroid\n")
 
     execution_time = time.time() - start_time
     print("\nexecution time:", execution_time, "s")
