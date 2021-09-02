@@ -102,8 +102,11 @@ if __name__ == "__main__":
             break
 
     with open(OUTPUT_PATH, "w") as f:
-        for centroid in new_centroids:
-            f.write(str(centroid) + "\n")
+        f.write("x,y,z,assignment,type")
+        for assignment in cluster_assignment_rdd.collect():
+            f.write(str(assignment[1]) + str(assignment[0]) + ",point\n")
+        for centroid in enumerate(new_centroids):
+            f.write(str(centroid[1]) + str(centroid[0]) + ",centroid\n")
 
     execution_time = time.time() - start_time
     print("\nexecution time:", execution_time, "s")
